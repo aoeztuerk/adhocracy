@@ -31,7 +31,7 @@ setup(
     ],
     long_description='\n'.join([open(f).read() for f in [
         "README.rst",
-        "INSTALLATION.md",
+        "INSTALLATION.rst",
         "CHANGES.txt",
         "AUTHORS.txt",
     ]]),
@@ -58,7 +58,7 @@ setup(
         "python-openid>=2.2.4",
         "python-memcached>=1.45",
         "sunburnt==0.6",
-        "PIL>=1.1.6",
+        "Pillow",
         "Markdown>=2.3",
         "lxml>=2.2.6",
         "Mako>=0.7.3",

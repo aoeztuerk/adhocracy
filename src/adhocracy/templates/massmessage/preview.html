@@ -12,7 +12,7 @@
     <p>${_("You're about to send the following message to %s recipients:") % c.recipients_count}</p>
 
     <dl>
-      <dt>From:</dt><dd>${c.sender}</dd>
+      <dt>From:</dt><dd>${c.sender_name} &lt;${c.sender_email}&gt;</dd>
       <dt>Subject:</dt><dd>${c.subject}</dd>
     </dl>
     <div class="message_preview_body">${c.body}</div>
@@ -23,7 +23,7 @@
     %for r in c.recipients:
       <li>${r.name} &lt;${r.email}&gt;</li>
     %endfor
-    </li>
+    </ul>
 
     %for pkey,pval in c.params.items():
       <input type="hidden" name="${pkey}" value="${pval}" />
