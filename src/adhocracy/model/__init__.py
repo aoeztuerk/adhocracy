@@ -8,6 +8,7 @@ import meta
 from adhocracy.model.user import User, user_table
 from adhocracy.model.openid import OpenID, openid_table
 from adhocracy.model.twitter import Twitter, twitter_table
+from adhocracy.model.userEmail import UserEmail, useremail_table
 from adhocracy.model.badge import (
     badge_table,
     Badge,
@@ -65,6 +66,12 @@ mapper(Twitter, twitter_table, properties={
                      backref=backref('twitters', cascade='delete'))
 })
 
+
+mapper(UserEmail, useremail_table, properties={
+    'user': relation(User, lazy=False,
+                     primaryjoin=useremail_table.c.user_id == user_table.c.id,
+                     backref=backref('useremails', cascade='delete'))
+})
 
 # --[ /start Badges ]-------------------------------------------------------
 

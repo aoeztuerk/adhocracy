@@ -163,6 +163,13 @@ class User(meta.Indexable):
         return None
 
     @property
+    def useremail(self):
+        for useremail in self.useremails:
+            if not useremail.is_deleted():
+                return useremail
+        return None
+
+    @property
     def openids(self):
         _ids = []
         for openid in self._openids:
@@ -334,6 +341,8 @@ class User(meta.Indexable):
         self.revoke_delegations()
         for twitter in self.twitters:
             twitter.delete(delete_time=delete_time)
+        for useremail in self.useremails:
+            useremail.delete(delete_time=delete_time)
         for openid in self.openids:
             openid.delete(delete_time=delete_time)
         for comment in self.comments:
