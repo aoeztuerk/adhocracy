@@ -59,14 +59,6 @@ twitter_table = Table('twitter', meta,
     Column('priority', Integer, default=4)
     )
 
-useremail_table = Table('useremail', meta,
-    Column('id', Integer, primary_key=True),
-    Column('user_id', Integer, ForeignKey('user.id'), nullable=False),
-    Column('email', Unicode(255), unique=True),
-    Column('activation_code', Unicode(255), nullable=True, unique=False),
-    Column('delete_time', DateTime, nullable=True)
-)
-
 group_table = Table('group', meta, 
     Column('id', Integer, primary_key=True),
     Column('group_name', Unicode(255), nullable=False, unique=True),
@@ -241,7 +233,6 @@ def upgrade(migrate_engine):
     oid_nonces.create()
     oid_associations.create()
     twitter_table.create()
-    useremail_table.create()
     group_table.create()
     group_permission_table.create()
     permission_table.create()
