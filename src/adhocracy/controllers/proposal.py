@@ -92,12 +92,9 @@ class ProposalController(BaseController):
 
         # FIXME: Add tag filtering again (now solr based)
         # FIXME: Live filtering ignores selected facets.
-        def_sort = None
-        if c.user and c.user.proposal_sort_order:
-            def_sort = c.user.proposal_sort_order
-        c.proposals_pager = pager.solr_proposal_pager(c.instance,
-                                                      {'text': query},
-                                                      default_sorting=def_sort)
+        c.proposals_pager = pager.solr_proposal_pager(
+                                c.instance,
+                                {'text': query})
 
         if format == 'json':
             return render_json(c.proposals_pager)
@@ -165,8 +162,8 @@ class ProposalController(BaseController):
 
     @RequireInstance
     @csrf.RequireInternalRequest(methods=['POST'])
+    @guard.proposal.create()
     def create(self, format='html'):
-        require.proposal.create()
 
         try:
             self.form_result = ProposalCreateForm().to_python(request.params)

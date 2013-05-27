@@ -52,7 +52,8 @@ def make_map(config):
                                          'reset': 'GET',
                                          'activate': 'GET',
                                          'resend': 'GET',
-                                         'set_password': 'POST'},
+                                         'set_password': 'POST',
+                                         'generate_welcome_link': 'POST'},
                  collection={'complete': 'GET',
                              'filter': 'GET'})
 
@@ -71,7 +72,6 @@ def make_map(config):
     map.connect('/message/new', controller='massmessage', action='new')
     map.connect('/message/preview', controller='massmessage', action='preview')
     map.connect('/message/create', controller='massmessage', action='create')
-
 
     map.connect('/register', controller='user', action='new')
     map.connect('/login', controller='user', action='login')
@@ -322,8 +322,6 @@ def make_map(config):
 
     map.connect('/stats/', controller='stats')
 
-    # API
-    map.connect('/api/{action}', controller='api')
     map.connect('/admin', controller='admin', action="index")
     map.connect('/admin/users/import', controller='admin',
                 action="user_import", conditions=dict(method=['POST']))
@@ -337,6 +335,17 @@ def make_map(config):
                 controller='admin', action='import_dialog')
     map.connect('/admin/import/do',
                 controller='admin', action='import_do')
+    map.connect('/admin/treatment/',
+                controller='treatment', action='index',
+                conditions={'method': 'GET'},)
+    map.connect('/admin/treatment/',
+                controller='treatment', action='create',
+                conditions={'method': 'POST'},)
+    map.connect('/admin/treatment/{key}/assign',
+                controller='treatment', action='assign',
+                conditions={'method': 'POST'},)
+    map.connect('/admin/treatment/{key}/assigned',
+                controller='treatment', action='assigned')
 
     map.connect('/static/', controller='static', action='index',
                 conditions=dict(method=['GET', 'HEAD']))

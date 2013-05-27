@@ -7,6 +7,7 @@ import meta
 
 from adhocracy.model.user import User, user_table
 from adhocracy.model.openid import OpenID, openid_table
+from adhocracy.model.shibboleth import Shibboleth, shibboleth_table
 from adhocracy.model.twitter import Twitter, twitter_table
 from adhocracy.model.userEmail import UserEmail, useremail_table
 from adhocracy.model.badge import (
@@ -44,6 +45,8 @@ from adhocracy.model.tag import Tag, tag_table
 from adhocracy.model.tagging import Tagging, tagging_table
 from adhocracy.model.page import Page, page_table
 from adhocracy.model.text import Text, text_table
+from adhocracy.model.treatment import (Treatment, treatment_table,
+                                       treatment_source_badges_table)
 from adhocracy.model.milestone import Milestone, milestone_table
 from adhocracy.model.selection import Selection, selection_table
 from adhocracy.model.staticpage import StaticPage, staticpage_table
@@ -213,6 +216,13 @@ mapper(OpenID, openid_table, properties={
     'user': relation(User, lazy=False,
                      primaryjoin=openid_table.c.user_id == user_table.c.id,
                      backref=backref('_openids', cascade='delete'))
+})
+
+
+mapper(Shibboleth, shibboleth_table, properties={
+    'user': relation(User, lazy=False,
+                     primaryjoin=shibboleth_table.c.user_id == user_table.c.id,
+                     backref=backref('_shibboleths', cascade='delete'))
 })
 
 
@@ -447,6 +457,12 @@ mapper(Text, text_table, properties={
 })
 
 
+mapper(Treatment, treatment_table, properties={
+    'source_badges': relation(UserBadge, lazy=True,
+                              secondary=treatment_source_badges_table)
+})
+
+
 mapper(Selection, selection_table, properties={
     'proposal': relation(
         Proposal, lazy=True, backref=backref('_selections'),
@@ -505,18 +521,13 @@ def before_commit(session):
         return
 
     for operation, entities in session._object_cache.items():
-        for entity in entities:
+        while len(entities) > 0:
+            entity = entities.pop()
+
+            if operation in [UPDATE, DELETE]:
+                cache.invalidate(entity)
+
             post_update(entity, operation)
-
-    #for entity in session._object_cache[INSERT]:
-
-    for entity in session._object_cache[UPDATE]:
-        cache.invalidate(entity)
-
-    for entity in session._object_cache[DELETE]:
-        cache.invalidate(entity)
-
-    del session._object_cache
 
 
 def post_update(entity, operation):

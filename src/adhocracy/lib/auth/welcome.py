@@ -12,6 +12,12 @@ from webob.exc import HTTPFound
 from zope.interface import implements
 
 
+def welcome_url(user, code):
+    from adhocracy.lib.helpers import base_url
+    return base_url("/welcome/%s/%s" % (user.user_name, code),
+                    absolute=True)
+
+
 def welcome_enabled(config=pylons.config):
     return asbool(config.get('adhocracy.enable_welcome', 'False'))
 
@@ -36,14 +42,28 @@ class WelcomeRepozeWho(object):
         if not m:
             return None
         u = model.User.find(m.group('id'))
-        if not u or not u.welcome_code or u.password:
+        if not u:
             return None
-        if u.welcome_code != m.group('code'):
+        is_correct = False
+        if u.welcome_code:
+            if u.welcome_code == m.group('code'):
+                is_correct = True
+        if not is_correct and (
+                u.reset_code and u.reset_code.startswith(u'welcome!')):
+            correct_code = u.reset_code.partition(u'welcome!')[2]
+            if m.group('code') == correct_code:
+                # At this point, we're sure the user really wanted to reset her
+                # password, so set the actual welcome code.
+                u.welcome_code = correct_code
+                u.reset_code = None
+                model.meta.Session.add(u)
+                model.meta.Session.commit()
+                is_correct = True
+        if not is_correct:
             return None
 
         from adhocracy.lib.helpers import base_url
-        root_url = base_url('/', instance=None, absolute=True,
-                            config=self.config)
+        root_url = base_url('/', instance=None, config=self.config)
         environ['repoze.who.application'] = HTTPFound(location=root_url)
 
         return {
@@ -66,10 +86,10 @@ class WelcomeRepozeWho(object):
         return userid
 
 
-def setup_auth(config, idenitifiers, authenticators):
+def setup_auth(config, identifiers, authenticators):
     if not welcome_enabled(config):
         return
 
     welcome_rwho = WelcomeRepozeWho(config, 'auth_tkt')
-    idenitifiers.append(('welcome', welcome_rwho))
+    identifiers.append(('welcome', welcome_rwho))
     authenticators.append(('welcome', welcome_rwho))

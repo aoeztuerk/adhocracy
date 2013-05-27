@@ -1,4 +1,5 @@
-from pylons import tmpl_context as c
+from paste.deploy.converters import asbool
+from pylons import tmpl_context as c, config
 from adhocracy.lib.auth.authorization import has
 from adhocracy.lib.auth.authorization import NOT_LOGGED_IN
 
@@ -13,10 +14,7 @@ def show(check, u):
 
 
 def create(check):
-    check.other('user_logged_in', c.user)
-
-    # previously, there was the following comment:
-    # return not c.user  # has('user.create')
+    check.other('user_logged_in', c.user is not None)
 
 
 def edit(check, u):
@@ -52,7 +50,10 @@ def show_dashboard(check, u):
 show_watchlist = show_dashboard
 
 
-delete = edit
+def delete(check, u):
+    edit(check, u)
+    allowed = asbool(config.get('adhocracy.self_deletion_allowed', 'true'))
+    check.other('self_deletion_allowed', not allowed)
 
 
 def vote(check):

@@ -1,4 +1,5 @@
 import logging
+import re
 
 import formencode
 from formencode import ForEach, htmlfill, validators
@@ -19,7 +20,9 @@ from adhocracy.lib import democracy, event, helpers as h, pager
 from adhocracy.lib import sorting, search as libsearch, tiles, text
 from adhocracy.lib.auth import require, login_user, guard
 from adhocracy.lib.auth.authorization import has
-from adhocracy.lib.auth.csrf import RequireInternalRequest
+from adhocracy.lib.auth.csrf import RequireInternalRequest, token_id
+from adhocracy.lib.auth.welcome import (welcome_enabled, can_welcome,
+                                        welcome_url)
 from adhocracy.lib.base import BaseController
 from adhocracy.lib.instance import RequireInstance
 import adhocracy.lib.mail as libmail
@@ -67,11 +70,7 @@ class UserUpdateForm(formencode.Schema):
                                     if_missing=3)
     email_messages = validators.StringBool(not_empty=False, if_empty=False,
                                            if_missing=False)
-    proposal_sort_order = validators.OneOf([''] + [
-        v.value
-        for g in PROPOSAL_SORTS.by_group.values()
-        for v in g
-    ])
+    proposal_sort_order = forms.ProposalSortOrder()
 
 
 class UserCodeForm(formencode.Schema):
@@ -107,6 +106,11 @@ class UserSetPasswordForm(formencode.Schema):
     password = validators.String(not_empty=False)
 
 
+class NoPasswordForm(formencode.Schema):
+    allow_extra_fields = True
+    login = validators.String(not_empty=False)
+
+
 class UserController(BaseController):
 
     def __init__(self):
@@ -114,9 +118,9 @@ class UserController(BaseController):
         c.active_subheader_nav = 'members'
 
     @RequireInstance
+    @guard.user.index()
     @validate(schema=UserFilterForm(), post_only=False, on_get=True)
     def index(self, format='html'):
-        require.user.index()
 
         default_sorting = config.get(
             'adhocracy.listings.instance_user.sorting', 'ACTIVITY')
@@ -129,12 +133,12 @@ class UserController(BaseController):
         c.tutorial = 'user_index'
         return render("/user/index.html")
 
+    @guard.perm('user.index_all')
     def all(self):
-        require.user.index()
         c.users_pager = solr_global_users_pager()
         return render("/user/all.html")
 
-    def new(self):
+    def new(self, defaults=None):
         if not h.allow_user_registration():
             return ret_abort(
                 _("Sorry, registration has been disabled by administrator."),
@@ -143,15 +147,17 @@ class UserController(BaseController):
         if c.user:
             redirect('/')
         else:
-            captacha_enabled = config.get('recaptcha.public_key', "")
-            c.recaptcha = captacha_enabled and h.recaptcha.displayhtml(
+            captcha_enabled = config.get('recaptcha.public_key', "")
+            c.recaptcha = captcha_enabled and h.recaptcha.displayhtml(
                 use_ssl=True)
-            session['came_from'] = request.params.get('came_from',
-                                                      h.base_url())
-            session.save()
-            return render("/user/register.html")
+            if defaults is None:
+                defaults = {}
+            defaults['_tok'] = token_id()
+            return htmlfill.render(render("/user/register.html"),
+                                   defaults=defaults)
 
     @RequireInternalRequest(methods=['POST'])
+    @guard.user.create()
     @validate(schema=UserCreateForm(), form="new", post_only=True)
     def create(self):
         if not h.allow_user_registration():
@@ -159,15 +165,14 @@ class UserController(BaseController):
                 _("Sorry, registration has been disabled by administrator."),
                 category='error', code=403)
 
-        require.user.create()
         if self.email_is_blacklisted(self.form_result['email']):
             return ret_abort(_("Sorry, but we don't accept registrations with "
                                "this email address."), category='error',
                              code=403)
 
         # SPAM protection recaptcha
-        captacha_enabled = config.get('recaptcha.public_key', "")
-        if captacha_enabled:
+        captcha_enabled = config.get('recaptcha.public_key', "")
+        if captcha_enabled:
             recaptcha_response = h.recaptcha.submit()
             if not recaptcha_response.is_valid:
                 c.recaptcha = h.recaptcha.displayhtml(
@@ -203,7 +208,15 @@ class UserController(BaseController):
         # api. This is done here and not with an redirect to the login
         # to omit the generic welcome message
         who_api = get_api(request.environ)
-        login = self.form_result.get("user_name")
+        login_configuration = h.allowed_login_types()
+        if 'username+password' in login_configuration:
+            login = self.form_result.get("user_name")
+        elif 'email+password' in login_configuration:
+            login = self.form_result.get("email")
+        else:
+            raise Exception('We have no way of authenticating the newly'
+                            'created user %s; check adhocracy.login_type' %
+                            login)
         credentials = {
             'login': login,
             'password': self.form_result.get("password")
@@ -213,13 +226,12 @@ class UserController(BaseController):
             # redirect to dashboard with login message
             session['logged_in'] = True
             session.save()
-            came_from = session.get('came_from', None)
-            if came_from is not None:
-                del session['came_from']
-                session.save()
+            came_from = request.params.get('came_from')
+            if came_from:
                 location = came_from
             else:
-                location = h.base_url('/user/%s/dashboard' % login)
+                location = h.base_url('/user/%s/dashboard' %
+                                      self.form_result.get("user_name"))
             raise HTTPFound(location=location, headers=headers)
         else:
             raise Exception('We have added the user to the Database '
@@ -307,24 +319,46 @@ class UserController(BaseController):
     @RequireInternalRequest(methods=['POST'])
     @validate(schema=UserResetApplyForm(), form="reset_form", post_only=True)
     def reset_request(self):
-        c.page_user = model.User.find_by_email(self.form_result.get('email'))
-        if c.page_user is None:
+        user = model.User.find_by_email(self.form_result.get('email'))
+        if user is None:
             msg = _("There is no user registered with that email address.")
             return htmlfill.render(self.reset_form(), errors=dict(email=msg))
-        c.page_user.reset_code = random_token()
-        model.meta.Session.add(c.page_user)
-        model.meta.Session.commit()
-        url = h.base_url("/user/%s/reset?c=%s" % (c.page_user.user_name,
-                                                  c.page_user.reset_code),
-                         absolute=True)
-        body = (
-            _("you have requested that your password be reset. In order "
-              "to confirm the validity of your claim, please open the "
-              "link below in your browser:") +
-            "\r\n\r\n  " + url + "\n\n" +
-            _("Your user name to login is: %s") % c.page_user.user_name)
+        return self._handle_reset(user)
 
-        libmail.to_user(c.page_user, _("Reset your password"), body)
+    def _handle_reset(self, user):
+        c.page_user = user
+
+        if welcome_enabled():
+            welcome_code = (c.page_user.welcome_code
+                            if c.page_user.welcome_code
+                            else random_token())
+            c.page_user.reset_code = u'welcome!' + welcome_code
+            model.meta.Session.add(c.page_user)
+            model.meta.Session.commit()
+            url = welcome_url(c.page_user, welcome_code)
+            body = (
+                _("you have requested that your password be reset. In order "
+                  "to confirm the validity of your claim, please open the "
+                  "link below in your browser:") +
+                "\n\n  " + url + "\n")
+            libmail.to_user(c.page_user,
+                            _("Login for %s") % h.site.name(),
+                            body)
+        else:
+            c.page_user.reset_code = random_token()
+            model.meta.Session.add(c.page_user)
+            model.meta.Session.commit()
+            url = h.base_url("/user/%s/reset?c=%s" % (c.page_user.user_name,
+                                                      c.page_user.reset_code),
+                             absolute=True)
+            body = (
+                _("you have requested that your password be reset. In order "
+                  "to confirm the validity of your claim, please open the "
+                  "link below in your browser:") +
+                "\r\n\r\n  " + url + "\n" +
+                _("Your user name to login is: %s") % c.page_user.user_name)
+
+            libmail.to_user(c.page_user, _("Reset your password"), body)
         return render("/user/reset_pending.html")
 
     @validate(schema=UserCodeForm(), form="reset_form", post_only=False,
@@ -431,10 +465,20 @@ class UserController(BaseController):
         if c.user:
             redirect('/')
         else:
-            session['came_from'] = request.params.get('came_from',
-                                                      h.base_url())
-            session.save()
-            return render('/user/login.html')
+            if 'came_from' not in request.params:
+                request.GET['came_from'] = h.base_url()
+            return self._render_loginform()
+
+    def _render_loginform(self, errors=None, defaults=None):
+        if defaults is None:
+            defaults = dict(request.params)
+            defaults.setdefault('have_password', 'true')
+            if '_login_value' in request.environ:
+                defaults['login'] = request.environ['_login_value']
+            defaults['_tok'] = token_id()
+        return htmlfill.render(render('/user/login.html'),
+                               errors=errors,
+                               defaults=defaults)
 
     def perform_login(self):
         pass  # managed by repoze.who
@@ -443,10 +487,8 @@ class UserController(BaseController):
         if c.user:
             session['logged_in'] = True
             session.save()
-            came_from = session.get('came_from', None)
+            came_from = request.params.get('came_from', None)
             if came_from is not None:
-                del session['came_from']
-                session.save()
                 redirect(came_from)
             # redirect to the dashboard inside the instance exceptionally
             # to be able to link to proposals and norms in the welcome
@@ -465,9 +507,7 @@ class UserController(BaseController):
                 if 'email+password' in login_configuration:
                     error_message = _("Invalid email or password")
 
-            return formencode.htmlfill.render(
-                render("/user/login.html"),
-                errors={"login": error_message})
+            return self._render_loginform(errors={"login": error_message})
 
     def logout(self):
         pass  # managed by repoze.who
@@ -476,6 +516,52 @@ class UserController(BaseController):
         session.delete()
         redirect(h.base_url())
 
+    @RequireInternalRequest(methods=['POST'])
+    @validate(schema=NoPasswordForm(), post_only=True)
+    def nopassword(self):
+        """ (Alternate login) User clicked "I have no password" """
+
+        assert config.get('adhocracy.login_style') == 'alternate'
+        user = request.environ['_adhocracy_nopassword_user']
+        if user:
+            return self._handle_reset(user)
+
+        login = self.form_result.get('login')
+        if u'@' not in login:
+            msg = _("Please use a valid email address.")
+            return self._render_loginform(errors={'login': msg})
+
+        if h.allow_user_registration():
+            handle = login.partition(u'@')[0]
+            defaults = {
+                'email': login,
+                'user_name': re.sub('[^0-9a-zA-Z_-]', '', handle),
+            }
+            return self.new(defaults=defaults)
+
+        support_email = config.get('adhocracy.registration_support_email')
+        if support_email:
+            body = (_('A user tried to register on %s with the email address'
+                      ' %s. Please contact them at %s .') %
+                    (h.site.name(),
+                     login,
+                     h.base_url('/', absolute=True)))
+            libmail.to_mail(
+                to_name=h.site.name(),
+                to_email=support_email,
+                subject=_('Registration attempt on %s') % h.site.name(),
+                body=body,
+                decorate_body=False,
+            )
+            data = {
+                'email': login,
+            }
+            return render('/user/registration_request_sent.html', data=data)
+
+        return ret_abort(
+            _("Sorry, registration has been disabled by administrator."),
+            category='error', code=403)
+
     def dashboard(self, id):
         '''Render a personalized dashboard for users'''
 
@@ -483,12 +569,9 @@ class UserController(BaseController):
             c.fresh_logged_in = True
             c.suppress_attention_getter = True
             del session['logged_in']
-            if 'came_from' in session:
-                c.came_from = session.get('came_from')
-                del session['came_from']
-                if isinstance(c.came_from, str):
-                    c.came_from = unicode(c.came_from, 'utf-8')
-            session.save()
+            came_from = request.params.get('came_from')
+            if came_from:
+                c.came_from = came_from
 
         #user object
         c.page_user = get_entity_or_abort(model.User, id,
@@ -645,8 +728,8 @@ class UserController(BaseController):
                               add_canonical=True)
         return render("/user/instances.html")
 
+    @guard.watch.index()
     def watchlist(self, id, format='html'):
-        require.watch.index()
         c.active_global_nav = 'watchlist'
         c.page_user = get_entity_or_abort(model.User, id,
                                           instance_filter=False)
@@ -726,9 +809,9 @@ class UserController(BaseController):
         else:
             redirect(h.site.base_url(instance=None))
 
+    @guard.user.index()
     @validate(schema=UserFilterForm(), post_only=False, on_get=True)
     def filter(self):
-        require.user.index()
         query = self.form_result.get('users_q')
         users = libsearch.query.run(query + u"*", entity_type=model.User,
                                     instance_filter=True)
@@ -824,3 +907,22 @@ class UserController(BaseController):
         h.flash(_('You already have a password - use that to log in.'),
                 'error')
         return redirect(h.base_url('/login'))
+
+    @RequireInternalRequest(methods=['POST'])
+    @guard.perm('global.admin')
+    def generate_welcome_link(self, id):
+        if not can_welcome():
+            return ret_abort(_("Requested generation of welcome codes, but "
+                               "welcome functionality"
+                               "(adhocracy.enable_welcome) is not enabled."),
+                             code=403)
+
+        page_user = get_entity_or_abort(model.User, id,
+                                        instance_filter=False)
+        if not page_user.welcome_code:
+            page_user.welcome_code = random_token()
+            model.meta.Session.add(page_user)
+            model.meta.Session.commit()
+        url = welcome_url(page_user, page_user.welcome_code)
+        h.flash(_('The user can now log in via %s') % url, 'success')
+        redirect(h.entity_url(page_user))
