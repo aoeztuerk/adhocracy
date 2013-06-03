@@ -156,6 +156,7 @@ if ! $not_use_sudo_commands; then
         debian )
     PKGS_TO_INSTALL=$PKGS_TO_INSTALL' gcc make build-essential bin86 unzip libpcre3-dev git mercurial python python-setuptools libssl-dev libbz2-dev libsqlite3-dev openjdk-6-jre libpq-dev'
     PKGS_TO_INSTALL=$PKGS_TO_INSTALL' openssh-client mutt'
+    PKGS_TO_INSTALL=$PKGS_TO_INSTALL' ruby rubygems'
 
     if $install_mysql_client; then
         PKGS_TO_INSTALL=$PKGS_TO_INSTALL' libmysqlclient-dev'
@@ -164,6 +165,7 @@ if ! $not_use_sudo_commands; then
         arch )
     PKGS_TO_INSTALL=$PKGS_TO_INSTALL' gcc make base-devel bin86 unzip git mercurial python2 sqlite jre7-openjdk postgresql-libs'
         PKGS_TO_INSTALL=$PKGS_TO_INSTALL' openssh mutt'
+        PKGS_TO_INSTALL=$PKGS_TO_INSTALL' ruby'
 
         if $install_mysql_client; then
         PKGS_TO_INSTALL=$PKGS_TO_INSTALL' libmysqlclient'
@@ -280,6 +282,10 @@ if [ '!' -x bin/python ]; then
 fi
 # Fix until https://github.com/collective/buildout.python/pull/31 is accepted
 find python/buildout.python/ -name *pyc -delete
+# Fix until https://github.com/collective/buildout.python/pull/32 is accepted
+if [ "$(strings bin/python | grep '^PyUnicodeUCS._DecodeLatin1$')" '!=' "$(strings eggs/lxml-*.egg/lxml/etree.so 2>/dev/null | grep '^PyUnicodeUCS._DecodeLatin1$')" ]; then
+    rm -rf -- eggs/lxml-*.egg
+fi
 
 # Set up adhocracy configuration
 ln -s -f "${buildout_cfg_file}" ./buildout_current.cfg

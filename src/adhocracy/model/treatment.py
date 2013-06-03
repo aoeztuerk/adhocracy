@@ -22,7 +22,7 @@ class Treatment(object):
         entry = cls(key, source_badges, variant_count)
         for i in range(variant_count):
             UserBadge.create(title=u'treatment-%s-%s' % (key, i),
-                             color=u'#000', visible=False, description=u'')
+                             color=u'', visible=False, description=u'')
         meta.Session.add(entry)
         meta.Session.flush()
         return entry
@@ -30,7 +30,7 @@ class Treatment(object):
     @classmethod
     def find(cls, key):
         q = meta.Session.query(cls)
-        q.filter(cls.key == key)
+        q = q.filter(cls.key == key)
         return q.first()
 
     @classmethod
@@ -49,6 +49,11 @@ class Treatment(object):
 
     def get_variant_badge(self, variant_id):
         return UserBadge.find('treatment-%s-%s' % (self.key, variant_id))
+
+    def __repr__(self):
+        return (u'<%s.%s(id=%r, key=%r, %r)>' %
+                (self.__module__, type(self).__name__,
+                self.id, self.key, self.variant_count))
 
 
 treatment_source_badges_table = Table(
